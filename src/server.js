@@ -10,6 +10,9 @@ config.validate();
 
 const app = express();
 app.disable('x-powered-by');
+if (process.env.TRUST_PROXY === '1' || process.env.TRUST_PROXY === 'true') {
+  app.set('trust proxy', 1);
+}
 app.use(express.urlencoded({ extended: true }));
 app.use(
   session({
