@@ -1,7 +1,19 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { buildReceiptQuery } = require('../src/etsy-api');
+const { buildReceiptQuery, shopFromResponse } = require('../src/etsy-api');
+
+test('accepts Etsy shop responses returned as a top-level object', () => {
+  assert.deepEqual(
+    shopFromResponse({ shop_id: 63902525, shop_name: 'TheObsidianChamber' }),
+    { shop_id: 63902525, shop_name: 'TheObsidianChamber' }
+  );
+});
+
+test('accepts legacy Etsy shop responses wrapped in results', () => {
+  const shop = { shop_id: 63902525, shop_name: 'TheObsidianChamber' };
+  assert.equal(shopFromResponse({ results: [shop] }), shop);
+});
 
 test('builds Etsy receipt filters for paid, unshipped, non-canceled orders', () => {
   const query = buildReceiptQuery({

@@ -126,6 +126,11 @@ async function apiFetch(accessToken, pathname, options = {}) {
   return json;
 }
 
+function shopFromResponse(response) {
+  if (response?.shop_id) return response;
+  return response?.results?.[0] || null;
+}
+
 async function ensureShopMeta(tokens) {
   if (tokens.shop_id) return tokens;
   const userId = userIdFromAccessToken(tokens.access_token);
@@ -133,7 +138,7 @@ async function ensureShopMeta(tokens) {
     tokens.access_token,
     `/users/${userId}/shops`
   );
-  const shop = shops.results?.[0];
+  const shop = shopFromResponse(shops);
   if (!shop?.shop_id) {
     throw new Error('No shop found for this Etsy account');
   }
@@ -230,6 +235,7 @@ module.exports = {
   getValidTokens,
   buildAuthUrl,
   getShop,
+  shopFromResponse,
   buildReceiptQuery,
   getReceipts,
   getListings,
