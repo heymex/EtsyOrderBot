@@ -10,6 +10,8 @@ services:
     image: ghcr.io/heymex/etsyorderbot:${ORDERBOT_IMAGE_TAG:-latest}
     container_name: orderbot
     restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       - NODE_ENV=production
       - PORT=${ORDERBOT_PORT:-3000}
@@ -18,6 +20,11 @@ services:
       - ETSY_SHARED_SECRET=${ETSY_SHARED_SECRET:?set ETSY_SHARED_SECRET in .env}
       - ETSY_REDIRECT_URI=${ETSY_REDIRECT_URI:?set ETSY_REDIRECT_URI in .env}
       - SESSION_SECRET=${SESSION_SECRET:?set SESSION_SECRET in .env}
+      - NOTIFICATION_WEBHOOK_URL=${NOTIFICATION_WEBHOOK_URL:?set NOTIFICATION_WEBHOOK_URL in .env}
+      - NOTIFICATION_WEBHOOK_SECRET=${NOTIFICATION_WEBHOOK_SECRET:-}
+      - ETSY_MONITOR_INTERVAL_SECONDS=${ETSY_MONITOR_INTERVAL_SECONDS:-300}
+      - ETSY_REMINDER_HOURS=${ETSY_REMINDER_HOURS:-6}
+      - HTTP_TIMEOUT_SECONDS=${HTTP_TIMEOUT_SECONDS:-15}
     volumes:
       - orderbot-data:/app/.data
     networks:

@@ -1,5 +1,6 @@
 const config = require('./config');
 const tokenStore = require('./token-store');
+const { fetchTextWithTimeout } = require('./http');
 
 const TOKEN_URL = 'https://api.etsy.com/v3/public/oauth/token';
 const API_ROOT = 'https://openapi.etsy.com/v3/application';
@@ -17,12 +18,15 @@ function userIdFromAccessToken(accessToken) {
 
 async function postForm(url, params) {
   const body = new URLSearchParams(params);
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body,
-  });
-  const text = await res.text();
+  const { response: res, text } = await fetchTextWithTimeout(
+    url,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body,
+    },
+    { timeoutMs: config.requestTimeoutMs }
+  );
   let json;
   try {
     json = text ? JSON.parse(text) : {};
@@ -102,8 +106,11 @@ async function apiFetch(accessToken, pathname, options = {}) {
     Accept: 'application/json',
     ...options.headers,
   };
-  const res = await fetch(url, { ...options, headers });
-  const text = await res.text();
+  const { response: res, text } = await fetchTextWithTimeout(
+    url,
+    { ...options, headers },
+    { timeoutMs: config.requestTimeoutMs }
+  );
   let json;
   try {
     json = text ? JSON.parse(text) : {};
@@ -150,14 +157,28 @@ async function getShop(tokens) {
   return apiFetch(t.access_token, `/shops/${t.shop_id}`);
 }
 
-async function getReceipts(tokens, { limit = 25, offset = 0 } = {}) {
-  const t = await ensureShopMeta(tokens);
+function buildReceiptQuery({
+  limit = 25,
+  offset = 0,
+  wasPaid,
+  wasShipped,
+  wasCanceled,
+} = {}) {
   const q = new URLSearchParams({
     limit: String(limit),
     offset: String(offset),
     sort_on: 'created',
     sort_order: 'desc',
   });
+  if (typeof wasPaid === 'boolean') q.set('was_paid', String(wasPaid));
+  if (typeof wasShipped === 'boolean') q.set('was_shipped', String(wasShipped));
+  if (typeof wasCanceled === 'boolean') q.set('was_canceled', String(wasCanceled));
+  return q;
+}
+
+async function getReceipts(tokens, options = {}) {
+  const t = await ensureShopMeta(tokens);
+  const q = buildReceiptQuery(options);
   return apiFetch(t.access_token, `/shops/${t.shop_id}/receipts?${q}`);
 }
 
@@ -209,6 +230,7 @@ module.exports = {
   getValidTokens,
   buildAuthUrl,
   getShop,
+  buildReceiptQuery,
   getReceipts,
   getListings,
   getListing,

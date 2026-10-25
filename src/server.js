@@ -1,14 +1,35 @@
 const express = require('express');
 const session = require('express-session');
+const path = require('path');
 const config = require('./config');
 const { randomState, createPkcePair } = require('./pkce');
 const tokenStore = require('./token-store');
 const etsy = require('./etsy-api');
 const { escapeHtml, layout } = require('./render');
+const { createStateStore } = require('./monitor-state-store');
+const { runOrderCheck } = require('./monitor-service');
+const { createMonitorRuntime, monitorHttpStatus } = require('./monitor-runtime');
+const { sendWebhook } = require('./notifier');
 
 config.validate();
 
 const app = express();
+const monitorStateStore = createStateStore(
+  path.join(__dirname, '..', '.data', 'order-monitor.json')
+);
+const monitorRuntime = createMonitorRuntime({
+  check: () =>
+    runOrderCheck({
+      getTokens: etsy.getValidTokens,
+      getReceipts: etsy.getReceipts,
+      stateStore: monitorStateStore,
+      notificationUrl: config.notificationWebhookUrl,
+      notificationSecret: config.notificationWebhookSecret,
+      send: sendWebhook,
+      reminderMs: config.reminderMs,
+      requestTimeoutMs: config.requestTimeoutMs,
+    }),
+});
 app.disable('x-powered-by');
 if (process.env.TRUST_PROXY === '1' || process.env.TRUST_PROXY === 'true') {
   app.set('trust proxy', 1);
@@ -53,11 +74,13 @@ function formatEtsyMoney(money) {
 
 app.get('/', loadTokens, (req, res) => {
   const { tokens } = res.locals;
+  const monitor = monitorRuntime.getStatus();
   if (!tokens) {
     const body = `
       <div class="card">
         <h1>OrderBot</h1>
         <p class="muted">Connect your Etsy seller account to view orders and listings.</p>
+        <p><strong>Order monitor:</strong> ${escapeHtml(monitor.status)}</p>
         <p><a class="btn" href="/auth">Sign in with Etsy</a></p>
         <p class="muted">Use an HTTPS callback registered in your Etsy app (tunnel for local dev).</p>
       </div>`;
@@ -68,9 +91,22 @@ app.get('/', loadTokens, (req, res) => {
     <h1>Dashboard</h1>
     <p class="muted">Signed in${tokens.shop_name ? ` — ${escapeHtml(tokens.shop_name)}` : ''}.</p>
     <div class="card">
+      <h2>Order monitor</h2>
+      <p><strong>Status:</strong> ${escapeHtml(monitor.status)}</p>
+      <p><strong>Open paid orders:</strong> ${escapeHtml(String(monitor.openOrders || 0))}</p>
+      <p><strong>Last check:</strong> ${escapeHtml(monitor.last_checked_at ? new Date(monitor.last_checked_at).toLocaleString() : 'Not yet')}</p>
+      ${monitor.error ? `<div class="alert error">${escapeHtml(monitor.error)}</div>` : ''}
+      ${!config.notificationWebhookUrl ? '<div class="alert error">Notifications are disabled. Set NOTIFICATION_WEBHOOK_URL.</div>' : ''}
+    </div>
+    <div class="card">
       <p><a href="/orders">Recent orders</a> · <a href="/listings">Shop listings</a></p>
     </div>`;
   res.type('html').send(layout({ title: 'Home', body }));
+});
+
+app.get('/health', (_req, res) => {
+  const monitor = monitorRuntime.getStatus();
+  res.status(monitorHttpStatus(monitor)).json({ service: 'orderbot', monitor });
 });
 
 app.get('/auth', (req, res) => {
@@ -278,4 +314,11 @@ app.use((err, _req, res, _next) => {
 app.listen(config.port, () => {
   console.log(`OrderBot http://localhost:${config.port}`);
   console.log(`OAuth callback path: ${config.callbackPath} (must match ETSY_REDIRECT_URI)`);
+  console.log(`Order monitor interval: ${Math.round(config.monitorIntervalMs / 1000)} seconds`);
+  if (!config.notificationWebhookUrl) {
+    console.warn('Order notifications are disabled: NOTIFICATION_WEBHOOK_URL is not set');
+  }
+  monitorRuntime.runOnce();
+  const timer = setInterval(() => monitorRuntime.runOnce(), config.monitorIntervalMs);
+  timer.unref();
 });
